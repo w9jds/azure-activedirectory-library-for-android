@@ -23,7 +23,6 @@ import java.io.UnsupportedEncodingException;
 import java.net.URL;
 import java.security.NoSuchAlgorithmException;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -782,7 +781,7 @@ public class AuthenticationContext {
     }
 
     private String getCorrelationLogInfo() {
-        return " CorrelationId: " + getRequestCorrelationId();
+        return " CorrelationId: " + getRequestCorrelationId() + " ADAL:" + getVersionName();
     }
 
     private void waitingRequestOnError(final AuthenticationRequestState waitingRequest,
@@ -1121,6 +1120,7 @@ public class AuthenticationContext {
             // It will start activity if callback is provided. Return null here.
             return null;
         } else {
+            Logger.v(TAG, "acquireToken without broker");
             return localFlow(callbackHandle, activity, request);
         }
     }

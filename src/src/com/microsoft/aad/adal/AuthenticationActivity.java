@@ -156,9 +156,12 @@ public class AuthenticationActivity extends Activity {
         cookieManager.setAcceptCookie(true);
 
         // Get the message from the intent
+        Logger.v(TAG, "Getting request from intent");
         mAuthRequest = getAuthenticationRequestFromIntent(getIntent());
         if (mAuthRequest == null) {
-            Log.d(TAG, "Request item is null, so it returns to caller");
+            Logger.e(TAG, "Request item is null, so it returns to caller", "",
+                    ADALError.ACTIVITY_REQUEST_INTENT_DATA_IS_NULL, new AuthenticationException(
+                            ADALError.ACTIVITY_REQUEST_INTENT_DATA_IS_NULL));
             Intent resultIntent = new Intent();
             resultIntent.putExtra(AuthenticationConstants.Browser.RESPONSE_ERROR_CODE,
                     AuthenticationConstants.Browser.WEBVIEW_INVALID_REQUEST);
@@ -224,7 +227,7 @@ public class AuthenticationActivity extends Activity {
             Logger.v(TAG, "It is a broker request");
             mCallingPackage = getCallingPackage();
             if (mCallingPackage == null) {
-                Log.d(TAG, "startActivityForResult is not used to call this activity");
+                Logger.v(TAG, "startActivityForResult is not used to call this activity");
                 Intent resultIntent = new Intent();
                 resultIntent.putExtra(AuthenticationConstants.Browser.RESPONSE_ERROR_CODE,
                         AuthenticationConstants.Browser.WEBVIEW_INVALID_REQUEST);
@@ -346,6 +349,7 @@ public class AuthenticationActivity extends Activity {
             authRequest.setBrokerAccountName(accountName);
             authRequest.setPrompt(promptBehavior);
         } else {
+            Logger.v(TAG, "It is a serialized request.");
             Serializable request = callingIntent
                     .getSerializableExtra(AuthenticationConstants.Browser.REQUEST_MESSAGE);
 
@@ -408,7 +412,7 @@ public class AuthenticationActivity extends Activity {
     }
 
     private boolean isBrokerRequest(Intent callingIntent) {
-        Logger.v(TAG, "Packagename:" + getPackageName() + " Broker packagename:"
+        Logger.v(TAG, "Verify broker request. Packagename:" + getPackageName() + " Broker packagename:"
                 + AuthenticationSettings.INSTANCE.getBrokerPackageName() + " Calling packagename:"
                 + getCallingPackage());
 
