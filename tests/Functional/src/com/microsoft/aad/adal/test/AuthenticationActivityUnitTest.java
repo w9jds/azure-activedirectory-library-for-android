@@ -58,6 +58,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 import com.microsoft.aad.adal.ADALError;
+import com.microsoft.aad.adal.ApplicationReceiver;
 import com.microsoft.aad.adal.AuthenticationActivity;
 import com.microsoft.aad.adal.AuthenticationConstants;
 import com.microsoft.aad.adal.AuthenticationException;
@@ -139,13 +140,7 @@ public class AuthenticationActivityUnitTest extends ActivityUnitTestCase<Authent
         assertNotNull(webview);
 
         // Javascript enabled
-        assertTrue(webview.getSettings().getJavaScriptEnabled());
-
-        // Spinner
-        Field f = AuthenticationActivity.class.getDeclaredField("mSpinner");
-        f.setAccessible(true);
-        ProgressDialog spinner = (ProgressDialog)f.get(getActivity());
-        assertNotNull(spinner);
+        assertTrue(webview.getSettings().getJavaScriptEnabled());       
     }
 
     @SmallTest
@@ -169,6 +164,39 @@ public class AuthenticationActivityUnitTest extends ActivityUnitTestCase<Authent
         Intent data = assertFinishCalledWithResult(AuthenticationConstants.UIResponse.BROWSER_CODE_CANCEL);
         assertEquals(TEST_REQUEST_ID,
                 data.getIntExtra(AuthenticationConstants.Browser.REQUEST_ID, 0));
+    }
+    
+    @SmallTest
+    @UiThreadTest
+    public void testWebview_InstallLink() throws IllegalArgumentException,
+            NoSuchFieldException, IllegalAccessException, InvocationTargetException,
+            ClassNotFoundException, NoSuchMethodException, InstantiationException,
+            InterruptedException, ExecutionException {
+        startActivity(intentToStartActivity, null, null);
+        activity = getActivity();
+        String url = AuthenticationConstants.Broker.BROWSER_EXT_INSTALL_PREFIX
+                + "?username=abc@outlook.com&app_link=https%3A%2F%2Fplay.google.com%2Fstore%2Fapps%2Fdetails%3Fid%3Dcom.azure.authenticator";
+        WebViewClient client = getCustomWebViewClient();
+        WebView mockview = new WebView(getActivity().getApplicationContext());
+        ReflectionUtils.setFieldValue(activity, "mSpinner", null);
+
+        // Act
+        client.shouldOverrideUrlLoading(mockview, url);
+
+        // Verify result code that includes requestid. Activity will set the
+        // result back to caller.
+        TestLogResponse response = new TestLogResponse();
+        final CountDownLatch signal = new CountDownLatch(1);
+        response.listenForLogMessage("It is an install request", signal);
+        int counter = 0;
+        while (!isFinishCalled() && counter < 20) {
+            Thread.sleep(DEVICE_RESPONSE_WAIT);
+            counter++;
+        }
+
+        String savedData = ApplicationReceiver.getInstallRequestInthisApp(getInstrumentation().getTargetContext());
+        assertNotNull(savedData);
+        assertTrue(savedData.contains("abc@outlook.com"));
     }
 
     /**
@@ -395,7 +423,7 @@ public class AuthenticationActivityUnitTest extends ActivityUnitTestCase<Authent
 
         // Verification from returned intent data
         Intent data = assertFinishCalledWithResult(AuthenticationConstants.UIResponse.TOKEN_BROKER_RESPONSE);
-        verify(mockAct, times(3)).setUserData(any(Account.class), anyString(), anyString());
+        verify(mockAct, times(8)).setUserData(any(Account.class), anyString(), anyString());
     }
 
     private MockWebRequestHandler setMockWebResponse() throws NoSuchFieldException,
@@ -429,7 +457,7 @@ public class AuthenticationActivityUnitTest extends ActivityUnitTestCase<Authent
 
         // get field value to check
         assertTrue("verify log message",
-                logResponse.message.startsWith("Webview onResume register broadcast"));
+                logResponse.message.contains("Webview onResume register broadcast"));
     }
 
     @SmallTest
@@ -513,7 +541,7 @@ public class AuthenticationActivityUnitTest extends ActivityUnitTestCase<Authent
         // Test onReceive call with correct request id
         signal.await(CONTEXT_REQUEST_TIME_OUT, TimeUnit.MILLISECONDS);
         assertTrue("log the message for correct Intent",
-                response.message.equals(broadcastCancelMsg1));
+                response.message.contains(broadcastCancelMsg1));
 
         // update requestId to match the AuthenticationRequest
         final CountDownLatch signal2 = new CountDownLatch(1);
@@ -527,7 +555,7 @@ public class AuthenticationActivityUnitTest extends ActivityUnitTestCase<Authent
         // verify that it received intent
         signal2.await(CONTEXT_REQUEST_TIME_OUT, TimeUnit.MILLISECONDS);
         assertTrue("log the message for correct Intent",
-                response2.message.equals(broadcastCancelMsg2));
+                response2.message.contains(broadcastCancelMsg2));
     }
 
     @Override

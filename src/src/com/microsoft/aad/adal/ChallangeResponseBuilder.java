@@ -106,25 +106,25 @@ class ChallangeResponseBuilder {
         @SuppressWarnings("unchecked")
         Class<IDeviceCertificate> certClazz = (Class<IDeviceCertificate>)AuthenticationSettings.INSTANCE
                 .getDeviceCertificateProxy();
-        if (certClazz == null) {
-            throw new AuthenticationException(ADALError.DEVICE_CERTIFICATE_API_EXCEPTION,
-                    "WPJ Api related class is not set");
-        }
+        if (certClazz != null) {
 
-        IDeviceCertificate deviceCertProxy = getWPJAPIInstance(certClazz);
-        if (deviceCertProxy.isValidIssuer(request.mCertAuthorities)) {
-            RSAPrivateKey privateKey = deviceCertProxy.getRSAPrivateKey();
-            if (privateKey != null) {
-                String jwt = mJWSBuilder.generateSignedJWT(request.mNonce, request.mSubmitUrl,
-                        privateKey, deviceCertProxy.getRSAPublicKey(),
-                        deviceCertProxy.getCertificate());
-                response.mAuthorizationHeaderValue = String.format(
-                        "%s AuthToken=\"%s\",Context=\"%s\"",
-                        AuthenticationConstants.Broker.CHALLANGE_RESPONSE_TYPE, jwt,
-                        request.mContext);
-                Logger.v(TAG, "Challange response:" + response.mAuthorizationHeaderValue);
-            } else {
-                throw new AuthenticationException(ADALError.KEY_CHAIN_PRIVATE_KEY_EXCEPTION);
+            IDeviceCertificate deviceCertProxy = getWPJAPIInstance(certClazz);
+            if (deviceCertProxy.isValidIssuer(request.mCertAuthorities)
+                    || (deviceCertProxy.getThumbPrint() != null && deviceCertProxy.getThumbPrint()
+                            .equalsIgnoreCase(request.mThumbprint))) {
+                RSAPrivateKey privateKey = deviceCertProxy.getRSAPrivateKey();
+                if (privateKey != null) {
+                    String jwt = mJWSBuilder.generateSignedJWT(request.mNonce, request.mSubmitUrl,
+                            privateKey, deviceCertProxy.getRSAPublicKey(),
+                            deviceCertProxy.getCertificate());
+                    response.mAuthorizationHeaderValue = String.format(
+                            "%s AuthToken=\"%s\",Context=\"%s\",Version=\"%s\"",
+                            AuthenticationConstants.Broker.CHALLANGE_RESPONSE_TYPE, jwt,
+                            request.mContext, request.mVersion);
+                    Logger.v(TAG, "Challange response:" + response.mAuthorizationHeaderValue);
+                } else {
+                    throw new AuthenticationException(ADALError.KEY_CHAIN_PRIVATE_KEY_EXCEPTION);
+                }
             }
         }
 
@@ -159,8 +159,9 @@ class ChallangeResponseBuilder {
     private ChallangeResponse getNoDeviceCertResponse(final ChallangeRequest request) {
         ChallangeResponse response = new ChallangeResponse();
         response.mSubmitUrl = request.mSubmitUrl;
-        response.mAuthorizationHeaderValue = String.format("CertAuth Context=\"%s\"",
-                request.mContext);
+        response.mAuthorizationHeaderValue = String.format("%s Context=\"%s\",Version=\"%s\"",
+                AuthenticationConstants.Broker.CHALLANGE_RESPONSE_TYPE, request.mContext,
+                request.mVersion);
         return response;
     }
 
@@ -204,6 +205,9 @@ class ChallangeResponseBuilder {
 
         validateChallangeRequest(headerItems, false);
         challange.mNonce = headerItems.get(RequestField.Nonce.name());
+        if (StringExtensions.IsNullOrBlank(challange.mNonce)) {
+            challange.mNonce = headerItems.get(RequestField.Nonce.name().toLowerCase(Locale.US));
+        }
         challange.mThumbprint = headerItems.get(RequestField.CertThumbprint.name());
         if (StringExtensions.IsNullOrBlank(challange.mThumbprint)) {
             throw new AuthenticationException(ADALError.DEVICE_CERTIFICATE_REQUEST_INVALID,
@@ -251,6 +255,7 @@ class ChallangeResponseBuilder {
             challange.mNonce = parameters.get(RequestField.Nonce.name().toLowerCase(Locale.US));
         }
         String authorities = parameters.get(RequestField.CertAuthorities.name());
+        Logger.v(TAG, "Cert authorities:" + authorities);
         challange.mCertAuthorities = StringExtensions.getStringTokens(authorities,
                 AuthenticationConstants.Broker.CHALLANGE_REQUEST_CERT_AUTH_DELIMETER);
         challange.mVersion = parameters.get(RequestField.Version.name());

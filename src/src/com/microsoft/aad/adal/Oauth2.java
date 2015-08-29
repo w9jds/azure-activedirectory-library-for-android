@@ -187,8 +187,9 @@ class Oauth2 {
 
     public static AuthenticationResult processUIResponseParams(HashMap<String, String> response) {
 
-        AuthenticationResult result = new AuthenticationResult();
+        AuthenticationResult result = null;
 
+        // Protocol error related
         if (response.containsKey(AuthenticationConstants.OAuth2.ERROR)) {
             // Error response from the server
             // CorrelationID will be same as in request headers. This is
@@ -198,6 +199,7 @@ class Oauth2 {
             if (!StringExtensions.IsNullOrBlank(correlationInResponse)) {
                 try {
                     correlationId = UUID.fromString(correlationInResponse);
+                    Logger.setCorrelationId(correlationId);
                 } catch (IllegalArgumentException ex) {
                     correlationId = null;
                     Logger.e(TAG, "CorrelationId is malformed: " + correlationInResponse, "",
@@ -209,11 +211,11 @@ class Oauth2 {
                     TAG,
                     "OAuth2 error:" + response.get(AuthenticationConstants.OAuth2.ERROR)
                             + " Description:"
-                            + response.get(AuthenticationConstants.OAuth2.ERROR_DESCRIPTION)
-                            + "CorrelationId:" + correlationId);
+                            + response.get(AuthenticationConstants.OAuth2.ERROR_DESCRIPTION));
 
             result = new AuthenticationResult(response.get(AuthenticationConstants.OAuth2.ERROR),
-                    response.get(AuthenticationConstants.OAuth2.ERROR_DESCRIPTION));
+                    response.get(AuthenticationConstants.OAuth2.ERROR_DESCRIPTION),
+                    response.get(AuthenticationConstants.OAuth2.ERROR_CODES));
 
         } else if (response.containsKey(AuthenticationConstants.OAuth2.CODE)) {
             result = new AuthenticationResult(response.get(AuthenticationConstants.OAuth2.CODE));
@@ -363,7 +365,8 @@ class Oauth2 {
      * 
      * @param authorizationUrl browser reached to this final url and it has code
      *            or token for next step
-     * @return Token in the AuthenticationResult
+     * @return Token in the AuthenticationResult. Null result if response does
+     *         not have protocol error.
      * @throws Exception
      */
     public AuthenticationResult getToken(String authorizationUrl) throws Exception {
@@ -390,25 +393,14 @@ class Oauth2 {
 
                 AuthenticationResult result = processUIResponseParams(parameters);
 
-                // Check if we have token or code
-                if (result != null
-                        && result.getStatus() == AuthenticationResult.AuthenticationStatus.Succeeded) {
-                    if (!result.getCode().isEmpty()) {
+                // Check if we have code
+                if (result != null && result.getCode() != null && !result.getCode().isEmpty()) {
 
-                        // Get token and use external callback to set result
-                        return getTokenForCode(result.getCode());
-
-                    } else if (!StringExtensions.IsNullOrBlank(result.getAccessToken())) {
-                        // We have token directly with implicit flow
-                        return result;
-                    } else {
-                        throw new AuthenticationException(ADALError.AUTH_FAILED_NO_TOKEN);
-                    }
-                } else {
-                    throw new AuthenticationException(ADALError.AUTH_FAILED_NO_TOKEN,
-                            result.getErrorCode() + " " + result.getErrorDescription());
+                    // Get token and use external callback to set result
+                    return getTokenForCode(result.getCode());
                 }
 
+                return result;
             } else {
                 throw new AuthenticationException(ADALError.AUTH_FAILED_BAD_STATE);
             }
@@ -456,6 +448,8 @@ class Oauth2 {
 
         try {
             mWebRequestHandler.setRequestCorrelationId(mRequest.getCorrelationId());
+            ClientMetrics.INSTANCE.beginClientMetricsRecord(authority, mRequest.getCorrelationId(),
+                    headers);
             HttpWebResponse response = mWebRequestHandler.sendPost(authority, headers,
                     requestMessage.getBytes(AuthenticationConstants.ENCODING_UTF8),
                     "application/x-www-form-urlencoded");
@@ -502,26 +496,47 @@ class Oauth2 {
                 }
             }
 
-            if (response.getResponseException() == null) {
+            if (response.getBody() != null) {
 
                 // Protocol related errors will read the error stream and report
                 // the error and error description
                 Logger.v(TAG, "Token request does not have exception");
                 result = processTokenResponse(response);
-            } else {
+                ClientMetrics.INSTANCE.setLastError(null);
+            }
 
-                // 400 Status code will throw here
-                throw response.getResponseException();
+            if (result == null) {
+                // non-protocol related error
+                String errMessage = null;
+                byte[] message = response.getBody();
+                if (message != null) {
+                    errMessage = new String(message);
+                } else {
+                    errMessage = "Status code:" + String.valueOf(response.getStatusCode());
+                }
+
+                Logger.v(TAG, "Server error message:" + errMessage);
+                if (response.getResponseException() != null) {
+                    throw response.getResponseException();
+                }
+            } else {
+                ClientMetrics.INSTANCE.setLastErrorCodes(result.getErrorCodes());
             }
         } catch (IllegalArgumentException e) {
+            ClientMetrics.INSTANCE.setLastError(null);
             Logger.e(TAG, e.getMessage(), "", ADALError.ARGUMENT_EXCEPTION, e);
             throw e;
         } catch (UnsupportedEncodingException e) {
+            ClientMetrics.INSTANCE.setLastError(null);
             Logger.e(TAG, e.getMessage(), "", ADALError.ENCODING_IS_NOT_SUPPORTED, e);
             throw e;
         } catch (Exception e) {
+            ClientMetrics.INSTANCE.setLastError(null);
             Logger.e(TAG, e.getMessage(), "", ADALError.SERVER_ERROR, e);
             throw e;
+        } finally {
+            ClientMetrics.INSTANCE.endClientMetricsRecord(ClientMetricsEndpointType.TOKEN,
+                    mRequest.getCorrelationId());
         }
 
         return result;
@@ -583,7 +598,7 @@ class Oauth2 {
                 // catch the
                 // generic Exception
                 Logger.e(TAG, ex.getMessage(), "", ADALError.SERVER_INVALID_JSON_RESPONSE, ex);
-                result = new AuthenticationResult(JSON_PARSING_ERROR, ex.getMessage());
+                result = new AuthenticationResult(JSON_PARSING_ERROR, ex.getMessage(), null);
             }
         } else {
             String errMessage = null;
@@ -595,7 +610,7 @@ class Oauth2 {
             }
             Logger.v(TAG, "Server error message:" + errMessage);
             result = new AuthenticationResult(String.valueOf(webResponse.getStatusCode()),
-                    errMessage);
+                    errMessage, null);
         }
 
         // Set correlationId in the result

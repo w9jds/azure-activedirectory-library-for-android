@@ -19,8 +19,10 @@
 package com.microsoft.aad.adal;
 
 import java.io.Serializable;
-import java.util.Calendar;
 import java.util.Date;
+
+import org.json.JSONException;
+import org.json.JSONObject;
 
 /**
  * Result class to keep code, token and other info Serializable properties Mark
@@ -64,6 +66,8 @@ public class AuthenticationResult implements Serializable {
     private String mErrorCode;
 
     private String mErrorDescription;
+
+    private String mErrorCodes;
 
     private boolean mIsMultiResourceRefreshToken;
 
@@ -110,9 +114,10 @@ public class AuthenticationResult implements Serializable {
         mStatus = AuthenticationStatus.Succeeded;
     }
 
-    AuthenticationResult(String errorCode, String errDescription) {
+    AuthenticationResult(String errorCode, String errDescription, String errorCodes) {
         mErrorCode = errorCode;
         mErrorDescription = errDescription;
+        mErrorCodes = errorCodes;
         mStatus = AuthenticationStatus.Failed;
     }
 
@@ -242,6 +247,7 @@ public class AuthenticationResult implements Serializable {
 
     /**
      * Gets error code.
+     * 
      * @return Error code
      */
     public String getErrorCode() {
@@ -250,6 +256,7 @@ public class AuthenticationResult implements Serializable {
 
     /**
      * Gets error description.
+     * 
      * @return error description
      */
     public String getErrorDescription() {
@@ -258,6 +265,7 @@ public class AuthenticationResult implements Serializable {
 
     /**
      * Gets error log info.
+     * 
      * @return log info
      */
     public String getErrorLogInfo() {
@@ -266,21 +274,15 @@ public class AuthenticationResult implements Serializable {
 
     /**
      * Checks expiration time.
+     * 
      * @return true if expired
      */
     public boolean isExpired() {
-        Date validity = getCurrentTime().getTime();
-
-        if (mExpiresOn != null && mExpiresOn.before(validity)) {
-            return true;
-        }
-
-        return false;
+        return TokenCacheItem.isTokenExpired(getExpiresOn());
     }
 
-    private static Calendar getCurrentTime() {
-        Calendar timeNow = Calendar.getInstance();
-        return timeNow;
+    String[] getErrorCodes() {
+    	return (mErrorCodes != null) ? mErrorCodes.replaceAll("[\\[\\]]", "").split("([^,]),") : null;
     }
 
     boolean isInitialRequest() {
@@ -302,5 +304,9 @@ public class AuthenticationResult implements Serializable {
 
     void setTenantId(String tenantid) {
         mTenantId = tenantid;
+    }
+    
+    void setRefreshToken(String refreshToken){
+        mRefreshToken = refreshToken;
     }
 }

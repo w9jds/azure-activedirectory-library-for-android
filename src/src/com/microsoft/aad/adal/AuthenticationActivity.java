@@ -31,7 +31,6 @@ import java.security.NoSuchProviderException;
 import java.security.UnrecoverableEntryException;
 import java.security.cert.CertificateException;
 import java.security.spec.InvalidKeySpecException;
-import java.util.HashMap;
 import java.util.UUID;
 
 import javax.crypto.BadPaddingException;
@@ -44,27 +43,24 @@ import android.accounts.AccountManager;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.ProgressDialog;
+import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.graphics.Bitmap;
-import android.net.http.SslError;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.support.v4.content.LocalBroadcastManager;
 import android.util.Log;
-import android.view.Menu;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.Window;
+import android.view.inputmethod.InputMethodManager;
 import android.webkit.CookieManager;
 import android.webkit.CookieSyncManager;
-import android.webkit.SslErrorHandler;
 import android.webkit.WebView;
-import android.webkit.WebViewClient;
 
 import com.google.gson.Gson;
-import com.microsoft.aad.adal.ChallangeResponseBuilder.ChallangeResponse;
+import com.microsoft.aad.adal.AuthenticationResult.AuthenticationStatus;
 
 /**
  * Authentication Activity to launch {@link WebView} for authentication.
@@ -108,6 +104,8 @@ public class AuthenticationActivity extends Activity {
     private IJWSBuilder mJWSBuilder = new JWSBuilder();
 
     private String mQueryParameters;
+
+    private boolean mPkeyAuthRedirect = false;
 
     // Broadcast receiver is needed to cancel outstanding AuthenticationActivity
     // for this AuthenticationContext since each instance of context can have
@@ -193,8 +191,10 @@ public class AuthenticationActivity extends Activity {
         }
 
         mRedirectUrl = mAuthRequest.getRedirectUri();
-        Log.d(TAG, "OnCreate redirectUrl:" + mRedirectUrl);
-        setupWebView();
+        Logger.v(TAG, "OnCreate redirectUrl:" + mRedirectUrl);
+     // Create the Web View to show the page
+        mWebView = (WebView)findViewById(this.getResources().getIdentifier("webView1", "id",
+                this.getPackageName()));
         Logger.v(TAG, "User agent:" + mWebView.getSettings().getUserAgentString());
         mStartUrl = "about:blank";
 
@@ -218,13 +218,21 @@ public class AuthenticationActivity extends Activity {
         mReceiver.mWaitingRequestId = mAuthRequest.getRequestId();
         LocalBroadcastManager.getInstance(this).registerReceiver(mReceiver,
                 new IntentFilter(AuthenticationConstants.Browser.ACTION_CANCEL));
+
+        String userAgent = mWebView.getSettings().getUserAgentString();
+        mWebView.getSettings().setUserAgentString(
+                userAgent + AuthenticationConstants.Broker.CLIENT_TLS_NOT_SUPPORTED);
+        userAgent = mWebView.getSettings().getUserAgentString();
+        Logger.v(TAG, "UserAgent:" + userAgent);
+
         if (isBrokerRequest(getIntent())) {
             // This activity is started from calling app and running in
             // Authenticator's process
-            Logger.v(TAG, "It is a broker request");
             mCallingPackage = getCallingPackage();
+            Logger.i(TAG, "It is a broker request for package:" + mCallingPackage, "");
+
             if (mCallingPackage == null) {
-                Log.d(TAG, "startActivityForResult is not used to call this activity");
+                Logger.v(TAG, "startActivityForResult is not used to call this activity");
                 Intent resultIntent = new Intent();
                 resultIntent.putExtra(AuthenticationConstants.Browser.RESPONSE_ERROR_CODE,
                         AuthenticationConstants.Browser.WEBVIEW_INVALID_REQUEST);
@@ -233,11 +241,7 @@ public class AuthenticationActivity extends Activity {
                 returnToCaller(AuthenticationConstants.UIResponse.BROWSER_CODE_ERROR, resultIntent);
                 return;
             }
-            String userAgent = mWebView.getSettings().getUserAgentString();
-            mWebView.getSettings().setUserAgentString(
-                    userAgent + AuthenticationConstants.Broker.CLIENT_TLS_NOT_SUPPORTED);
-            userAgent = mWebView.getSettings().getUserAgentString();
-            Logger.v(TAG, "UserAgent:" + userAgent);
+
             mAccountAuthenticatorResponse = getIntent().getParcelableExtra(
                     AccountManager.KEY_ACCOUNT_AUTHENTICATOR_RESPONSE);
             if (mAccountAuthenticatorResponse != null) {
@@ -248,37 +252,79 @@ public class AuthenticationActivity extends Activity {
             mCallingUID = info.getUIDForPackage(mCallingPackage);
             String signatureDigest = info.getCurrentSignatureForPackage(mCallingPackage);
             mStartUrl = getBrokerStartUrl(mStartUrl, mCallingPackage, signatureDigest);
-            mRedirectUrl = PackageHelper.getBrokerRedirectUrl(mCallingPackage, signatureDigest);
-            Logger.v(TAG,
-                    "OnCreate redirectUrl:" + mRedirectUrl + " startUrl:" + mStartUrl
-                            + " calling package:" + mCallingPackage + " signatureDigest:"
-                            + signatureDigest + " current Context Package: " + getPackageName()
-                            + " accountName:" + mAuthRequest.getBrokerAccountName() + " loginHint:"
-                            + mAuthRequest.getLoginHint());
+
+            if (!isCallerBrokerInstaller()) {
+                Logger.v(TAG, "Caller needs to be verified using special redirectUri");
+                mRedirectUrl = PackageHelper.getBrokerRedirectUrl(mCallingPackage, signatureDigest);
+            }
+            Logger.v(TAG, "OnCreate redirectUrl:" + mRedirectUrl + " startUrl:" + mStartUrl
+                    + " calling package:" + mCallingPackage + " signatureDigest:" + signatureDigest
+                    + " current Context Package: " + getPackageName());
         }
         mRegisterReceiver = false;
         final String postUrl = mStartUrl;
-        Logger.v(TAG, "OnCreate startUrl:" + mStartUrl + " calling package:" + mCallingPackage
-                + " loginHint:" + mAuthRequest.getLoginHint());
-        mWebView.post(new Runnable() {
-            @Override
-            public void run() {
-                // load blank first
-                mWebView.loadUrl("about:blank");
-                mWebView.loadUrl(postUrl);
-            }
-        });
+        Logger.i(TAG, "OnCreate startUrl:" + mStartUrl + " calling package:" + mCallingPackage,
+                " device:" + android.os.Build.VERSION.RELEASE + " " + android.os.Build.MANUFACTURER
+                        + android.os.Build.MODEL);
+
+        setupWebView(mRedirectUrl, mQueryParameters, mAuthRequest);
+        
+        if (savedInstanceState == null) {
+            mWebView.post(new Runnable() {
+                @Override
+                public void run() {
+                    // load blank first to avoid error for not loading webview
+                    mWebView.loadUrl("about:blank");
+                    mWebView.loadUrl(postUrl);
+                }
+            });
+        } else {
+            Logger.v(TAG, "Reuse webview");
+        }
     }
 
-    private void setupWebView() {
+    private boolean isCallerBrokerInstaller() {
+        // Allow intune's signature check
+        PackageHelper info = new PackageHelper(AuthenticationActivity.this);
+        String packageName = getCallingPackage();
+        if (!StringExtensions.IsNullOrBlank(packageName)) {
 
-        // Spinner dialog to show some message while it is loading
-        mSpinner = new ProgressDialog(this);
-        mSpinner.requestWindowFeature(Window.FEATURE_NO_TITLE);
+            if (packageName.equals(AuthenticationSettings.INSTANCE.getBrokerPackageName())) {
+                Logger.v(TAG, "isCallerBrokerInstaller: same package as broker " + packageName);
+                return true;
+            }
 
-        // Create the Web View to show the page
-        mWebView = (WebView)findViewById(this.getResources().getIdentifier("webView1", "id",
-                this.getPackageName()));
+            String signature = info.getCurrentSignatureForPackage(packageName);
+            Logger.v(TAG, "isCallerBrokerInstaller: Check signature for " + packageName
+                    + " signature:" + signature + " brokerSignature:"
+                    + AuthenticationSettings.INSTANCE.getBrokerSignature());
+            return signature.equals(AuthenticationSettings.INSTANCE.getBrokerSignature())
+                    || signature
+                            .equals(AuthenticationConstants.Broker.AZURE_AUTHENTICATOR_APP_SIGNATURE);
+        }
+
+        return false;
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+
+        // Save the state of the WebView
+        mWebView.saveState(outState);
+    }
+
+    @Override
+    protected void onRestoreInstanceState(Bundle savedInstanceState) {
+        super.onRestoreInstanceState(savedInstanceState);
+
+        // Restore the state of the WebView
+        mWebView.restoreState(savedInstanceState);
+    }
+
+    private void setupWebView(String redirect, String queryParam, AuthenticationRequest request) {
+
+        
         mWebView.getSettings().setJavaScriptEnabled(true);
         mWebView.requestFocus(View.FOCUS_DOWN);
 
@@ -345,6 +391,7 @@ public class AuthenticationActivity extends Activity {
                     loginhint, correlationIdParsed);
             authRequest.setBrokerAccountName(accountName);
             authRequest.setPrompt(promptBehavior);
+            authRequest.setRequestId(mWaitingRequestId);
         } else {
             Serializable request = callingIntent
                     .getSerializableExtra(AuthenticationConstants.Browser.REQUEST_MESSAGE);
@@ -415,8 +462,7 @@ public class AuthenticationActivity extends Activity {
         // Intent should have a flag and activity is hosted inside broker
         return callingIntent != null
                 && !StringExtensions.IsNullOrBlank(callingIntent
-                        .getStringExtra(AuthenticationConstants.Broker.BROKER_REQUEST))
-                && getPackageName().equals(AuthenticationSettings.INSTANCE.getBrokerPackageName());
+                        .getStringExtra(AuthenticationConstants.Broker.BROKER_REQUEST));
     }
 
     /**
@@ -426,7 +472,7 @@ public class AuthenticationActivity extends Activity {
      * @param data
      */
     private void returnToCaller(int resultCode, Intent data) {
-        Logger.d(TAG, "Return To Caller:" + resultCode);
+        Logger.v(TAG, "Return To Caller:" + resultCode);
         displaySpinner(false);
 
         if (data == null) {
@@ -435,7 +481,7 @@ public class AuthenticationActivity extends Activity {
 
         if (mAuthRequest != null) {
             // set request id related to this response to send the delegateId
-            Logger.d(TAG, "Return To Caller REQUEST_ID:" + mAuthRequest.getRequestId());
+            Logger.v(TAG, "Return To Caller REQUEST_ID:" + mAuthRequest.getRequestId());
             data.putExtra(AuthenticationConstants.Browser.REQUEST_ID, mAuthRequest.getRequestId());
         } else {
             Logger.w(TAG, "Request object is null", "",
@@ -448,7 +494,7 @@ public class AuthenticationActivity extends Activity {
 
     @Override
     protected void onPause() {
-        Logger.d(TAG, "AuthenticationActivity onPause unregister receiver");
+        Logger.v(TAG, "AuthenticationActivity onPause unregister receiver");
         super.onPause();
 
         // Unregister the cancel action listener from the local broadcast
@@ -457,13 +503,19 @@ public class AuthenticationActivity extends Activity {
             LocalBroadcastManager.getInstance(this).unregisterReceiver(mReceiver);
         }
         mRegisterReceiver = true;
-        // restart webview when it comes back from onresume
+
+        if (mSpinner != null) {
+            Logger.v(TAG, "Spinner at onPause will dismiss");
+            mSpinner.dismiss();
+        }
+        
+        hideKeyBoard();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-
+        Logger.v(TAG, "onResume");
         // It can come here from onCreate, onRestart or onPause.
         // Don't load url again since it will send another 2FA request
         if (mRegisterReceiver) {
@@ -476,19 +528,28 @@ public class AuthenticationActivity extends Activity {
             }
         }
         mRegisterReceiver = false;
+
+        // Spinner dialog to show some message while it is loading
+        mSpinner = new ProgressDialog(this);
+        mSpinner.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        mSpinner.setMessage(this.getText(this.getResources().getIdentifier("app_loading", "string",
+                this.getPackageName())));
     }
 
     @Override
     protected void onRestart() {
-        Logger.d(TAG, "AuthenticationActivity onRestart");
+        Logger.v(TAG, "AuthenticationActivity onRestart");
         super.onRestart();
         mRegisterReceiver = true;
     }
 
     @Override
     public void onBackPressed() {
-        Logger.d(TAG, "Back button is pressed");
-        if (!mWebView.canGoBackOrForward(BACK_PRESSED_CANCEL_DIALOG_STEPS)) {
+        Logger.v(TAG, "Back button is pressed");
+
+        // User should be able to click back button to cancel in case pkeyauth
+        // happen.
+        if (mPkeyAuthRedirect || !mWebView.canGoBackOrForward(BACK_PRESSED_CANCEL_DIALOG_STEPS)) {
             // counting blank page as well
             cancelRequest();
         } else {
@@ -498,107 +559,54 @@ public class AuthenticationActivity extends Activity {
         }
     }
 
-    @Override
-    public boolean onCreateOptionsMenu(Menu menu) {
-        // Inflate the menu; this adds items to the action bar if it is present.
-        getMenuInflater().inflate(R.menu.login, menu);
-        return true;
-    }
-
     private void cancelRequest() {
         Logger.v(TAG, "Sending intent to cancel authentication activity");
         Intent resultIntent = new Intent();
         returnToCaller(AuthenticationConstants.UIResponse.BROWSER_CODE_CANCEL, resultIntent);
     }
 
-    class CustomWebViewClient extends WebViewClient {
+    private void hideKeyBoard() {
+        if (mWebView != null) {
+            InputMethodManager imm = (InputMethodManager)this
+                    .getSystemService(Service.INPUT_METHOD_SERVICE);
+            imm.hideSoftInputFromWindow(mWebView.getApplicationWindowToken(), 0);
+        }
+    }
+    
+    class CustomWebViewClient extends BasicWebViewClient {
 
-        private static final String BLANK_PAGE = "about:blank";
-
-        @Override
-        public boolean shouldOverrideUrlLoading(WebView view, String url) {
-            Logger.d(TAG, "shouldOverrideUrlLoading:url=" + url);
-            displaySpinner(true);
-            if (url.startsWith(AuthenticationConstants.Broker.CLIENT_TLS_REDIRECT)) {
-                Logger.v(TAG, "Webview detected request for client certificate");
+        public CustomWebViewClient(){
+            super(AuthenticationActivity.this, mRedirectUrl, mQueryParameters, mAuthRequest);
+        }
+                
+        public void processRedirectUrl(final WebView view, String url){
+            if (!isBrokerRequest(getIntent())) {
+                // It is pointing to redirect. Final url can be processed to
+                // get the code or error.
+                Logger.i(TAG, "It is not a broker request", "");
+                Intent resultIntent = new Intent();
+                resultIntent.putExtra(AuthenticationConstants.Browser.RESPONSE_FINAL_URL, url);
+                resultIntent.putExtra(AuthenticationConstants.Browser.RESPONSE_REQUEST_INFO,
+                        mAuthRequest);
+                returnToCaller(AuthenticationConstants.UIResponse.BROWSER_CODE_COMPLETE,
+                        resultIntent);
                 view.stopLoading();
-                // avoid main thread locking
-                final String challangeUrl = url;
-                new Thread(new Runnable() {
-                    @Override
-                    public void run() {
-                        try {
-                            ChallangeResponseBuilder certHandler = new ChallangeResponseBuilder(
-                                    mJWSBuilder);
-                            final ChallangeResponse challangeResponse = certHandler
-                                    .getChallangeResponseFromUri(challangeUrl);
-                            final HashMap<String, String> headers = new HashMap<String, String>();
-                            headers.put(AuthenticationConstants.Broker.CHALLANGE_RESPONSE_HEADER,
-                                    challangeResponse.mAuthorizationHeaderValue);
-                            mWebView.post(new Runnable() {
+            } else {
+                Logger.i(TAG, "It is a broker request", "");
+                displaySpinnerWithMessage(AuthenticationActivity.this
+                        .getText(AuthenticationActivity.this.getResources().getIdentifier(
+                                "broker_processing", "string", getPackageName())));
 
-                                @Override
-                                public void run() {
-                                    String loadUrl = challangeResponse.mSubmitUrl;
-                                    HashMap<String, String> parameters = StringExtensions
-                                            .getUrlParameters(challangeResponse.mSubmitUrl);
-                                    Logger.v(TAG, "SubmitUrl:" + challangeResponse.mSubmitUrl);
-                                    if (!parameters
-                                            .containsKey(AuthenticationConstants.OAuth2.CLIENT_ID)) {
-                                        loadUrl = loadUrl + "?" + mQueryParameters;
-                                    }
-                                    Logger.v(TAG, "Loadurl:" + loadUrl);
-                                    mWebView.loadUrl(loadUrl, headers);
-                                }
-                            });
-                        } catch (IllegalArgumentException e) {
-                            Logger.e(TAG, "Argument exception", e.getMessage(),
-                                    ADALError.ARGUMENT_EXCEPTION, e);
-                            // It should return error code and finish the
-                            // activity, so that onActivityResult implementation
-                            // returns errors to callback.
-                            returnAuthenticationException(new AuthenticationException(
-                                    ADALError.ARGUMENT_EXCEPTION, e.getMessage(), e));
-                        } catch (AuthenticationException e) {
-                            Logger.e(TAG, "It is failed to create device certificate response",
-                                    e.getMessage(), ADALError.DEVICE_CERTIFICATE_RESPONSE_FAILED, e);
-                            // It should return error code and finish the
-                            // activity, so that onActivityResult implementation
-                            // returns errors to callback.
-                            returnAuthenticationException(e);
-                        }
-                    }
-                }).start();
+                view.stopLoading();
 
-                return true;
-            } else if (url.startsWith(mRedirectUrl)) {
-                Logger.v(TAG, "Webview reached redirecturl");
-                if (!isBrokerRequest(getIntent())) {
-                    // It is pointing to redirect. Final url can be processed to
-                    // get the code or error.
-                    Logger.v(TAG, "It is not a broker request");
-                    Intent resultIntent = new Intent();
-                    resultIntent.putExtra(AuthenticationConstants.Browser.RESPONSE_FINAL_URL, url);
-                    resultIntent.putExtra(AuthenticationConstants.Browser.RESPONSE_REQUEST_INFO,
-                            mAuthRequest);
-                    returnToCaller(AuthenticationConstants.UIResponse.BROWSER_CODE_COMPLETE,
-                            resultIntent);
-                    view.stopLoading();
-                    return true;
-                } else {
-                    Logger.v(TAG, "It is a broker request");
-                    displaySpinnerWithMessage(AuthenticationActivity.this.getResources().getString(
-                            R.string.broker_processing));
-                    view.stopLoading();
-
-                    // do async task and show spinner while exchanging code for
-                    // access token
-                    new TokenTask(mWebRequestHandler, mAuthRequest, mCallingPackage, mCallingUID)
-                            .execute(url);
-                    return true;
-                }
+                // do async task and show spinner while exchanging code for
+                // access token
+                new TokenTask(mWebRequestHandler, mAuthRequest, mCallingPackage, mCallingUID)
+                        .execute(url);
             }
-
+        }
+        
+        public boolean processInvalidUrl(final WebView view, String url) {
             if (isBrokerRequest(getIntent())
                     && url.startsWith(AuthenticationConstants.Broker.REDIRECT_PREFIX)) {
                 returnError(ADALError.DEVELOPER_REDIRECTURI_INVALID, String.format(
@@ -610,69 +618,41 @@ public class AuthenticationActivity extends Activity {
 
             return false;
         }
-
-        @Override
-        public void onReceivedError(WebView view, int errorCode, String description,
-                String failingUrl) {
-            super.onReceivedError(view, errorCode, description, failingUrl);
-            displaySpinner(false);
-            Logger.e(TAG, "Webview received an error. Errorcode:" + errorCode + " " + description,
-                    "", ADALError.ERROR_WEBVIEW);
-            Intent resultIntent = new Intent();
-            resultIntent.putExtra(AuthenticationConstants.Browser.RESPONSE_ERROR_CODE,
-                    "Error Code:" + errorCode);
-            resultIntent.putExtra(AuthenticationConstants.Browser.RESPONSE_ERROR_MESSAGE,
-                    description);
-            resultIntent.putExtra(AuthenticationConstants.Browser.RESPONSE_REQUEST_INFO,
-                    mAuthRequest);
-            returnToCaller(AuthenticationConstants.UIResponse.BROWSER_CODE_ERROR, resultIntent);
+        
+        public void showSpinner(boolean status){
+            displaySpinner(status);
         }
 
         @Override
-        public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
-            // Developer does not have option to control this for now
-            super.onReceivedSslError(view, handler, error);
-            displaySpinner(false);
-            handler.cancel();
-            Logger.e(TAG, "Received ssl error", "", ADALError.ERROR_FAILED_SSL_HANDSHAKE);
-            Intent resultIntent = new Intent();
-            resultIntent.putExtra(AuthenticationConstants.Browser.RESPONSE_ERROR_CODE, "Code:"
-                    + ERROR_FAILED_SSL_HANDSHAKE);
-            resultIntent.putExtra(AuthenticationConstants.Browser.RESPONSE_ERROR_MESSAGE,
-                    error.toString());
-            resultIntent.putExtra(AuthenticationConstants.Browser.RESPONSE_REQUEST_INFO,
-                    mAuthRequest);
-            returnToCaller(AuthenticationConstants.UIResponse.BROWSER_CODE_ERROR, resultIntent);
+        public void sendResponse(int returnCode, Intent responseIntent) {
+            returnToCaller(returnCode, responseIntent);            
         }
 
         @Override
-        public void onPageFinished(WebView view, String url) {
-            super.onPageFinished(view, url);
-            Logger.v(TAG, "Page finished:" + url);
-
-            /*
-             * Once web view is fully loaded,set to visible
-             */
-            mWebView.setVisibility(View.VISIBLE);
-            if (!url.startsWith(BLANK_PAGE)) {
-                displaySpinner(false);
-            }
+        public void cancelWebViewRequest() {
+            cancelRequest();            
         }
 
         @Override
-        public void onPageStarted(WebView view, String url, Bitmap favicon) {
-            super.onPageStarted(view, url, favicon);
-            displaySpinner(true);
+        public void setPKeyAuthStatus(boolean status) {
+            mPkeyAuthRedirect = status;            
+        }
+
+        @Override
+        public void postRunnable(Runnable item) {
+            mWebView.post(item);            
         }
     }
 
     /**
-     * handle spinner display
+     * handle spinner display.
      * 
      * @param show
      */
     private void displaySpinner(boolean show) {
-        if (!AuthenticationActivity.this.isFinishing() && mSpinner != null) {
+        if (!AuthenticationActivity.this.isFinishing()
+                && !AuthenticationActivity.this.isChangingConfigurations() && mSpinner != null) {
+            Logger.v(TAG, "displaySpinner:" + show + " showing:" + mSpinner.isShowing());
             if (show && !mSpinner.isShowing()) {
                 mSpinner.show();
             }
@@ -683,11 +663,10 @@ public class AuthenticationActivity extends Activity {
         }
     }
 
-    private void displaySpinnerWithMessage(String msg) {
+    private void displaySpinnerWithMessage(CharSequence charSequence) {
         if (!AuthenticationActivity.this.isFinishing() && mSpinner != null) {
             mSpinner.show();
-            mSpinner.setTitle("Processing ");
-            mSpinner.setMessage(msg);
+            mSpinner.setMessage(charSequence);
         }
     }
 
@@ -802,7 +781,7 @@ public class AuthenticationActivity extends Activity {
             String digestKey = StringExtensions
                     .createHash(AuthenticationConstants.Broker.USERDATA_UID_KEY + mAppCallingUID
                             + cacheKey);
-            Logger.d(TAG, "Cache key original:" + cacheKey + " digestKey:" + digestKey
+            Logger.v(TAG, "Cache key original:" + cacheKey + " digestKey:" + digestKey
                     + " calling app UID:" + mAppCallingUID);
             return digestKey;
         }
@@ -817,12 +796,20 @@ public class AuthenticationActivity extends Activity {
             if (appIdList == null) {
                 appIdList = "";
             } else {
-                appIdList = cryptoHelper.decrypt(appIdList);
+                try {
+                    appIdList = cryptoHelper.decrypt(appIdList);
+                } catch (Exception ex) {
+                    Logger.e(TAG, "appUIDList failed to decrypt", "appIdList:" + appIdList,
+                            ADALError.ENCRYPTION_FAILED, ex);
+                    appIdList = "";
+                    Logger.i(TAG, "Reset the appUIDlist", "");
+                }
             }
-            Logger.v(TAG, "Add calling UID:" + mAppCallingUID);
+
+            Logger.i(TAG, "Add calling UID:" + mAppCallingUID, "appIdList:" + appIdList);
             if (!appIdList.contains(AuthenticationConstants.Broker.USERDATA_UID_KEY
                     + mAppCallingUID)) {
-                Logger.v(TAG, "Account has new calling UID:" + mAppCallingUID);
+                Logger.i(TAG, "Account has new calling UID:" + mAppCallingUID, "");
                 mAccountManager
                         .setUserData(
                                 account,
@@ -852,22 +839,39 @@ public class AuthenticationActivity extends Activity {
                     return;
                 }
 
+                Account newaccount = accountList[0];
+                
                 // Single user in authenticator is already created.
                 // This is only registering UID for the app
-                if (result.taskResult.getUserInfo() == null
-                        || StringExtensions.IsNullOrBlank(result.taskResult.getUserInfo()
-                                .getUserId())) {
+                UserInfo userinfo = result.taskResult.getUserInfo();
+                if (userinfo == null || StringExtensions.IsNullOrBlank(userinfo.getUserId())) {
                     // return userid in the userinfo and use only account name
                     // for all fields
-                    Logger.v(TAG, "Set userinfo from account");
+                    Logger.i(TAG, "Set userinfo from account", "");
                     result.taskResult.setUserInfo(new UserInfo(name, name, "", "", name));
                     mRequest.setLoginHint(name);
+                } else {
+                    Logger.i(TAG, "Saving userinfo to account", "");
+                    mAccountManager.setUserData(newaccount,
+                            AuthenticationConstants.Broker.ACCOUNT_USERINFO_USERID,
+                            userinfo.getUserId());
+                    mAccountManager.setUserData(newaccount,
+                            AuthenticationConstants.Broker.ACCOUNT_USERINFO_GIVEN_NAME,
+                            userinfo.getGivenName());
+                    mAccountManager.setUserData(newaccount,
+                            AuthenticationConstants.Broker.ACCOUNT_USERINFO_FAMILY_NAME,
+                            userinfo.getFamilyName());
+                    mAccountManager.setUserData(newaccount,
+                            AuthenticationConstants.Broker.ACCOUNT_USERINFO_IDENTITY_PROVIDER,
+                            userinfo.getIdentityProvider());
+                    mAccountManager.setUserData(newaccount,
+                            AuthenticationConstants.Broker.ACCOUNT_USERINFO_USERID_DISPLAYABLE,
+                            userinfo.getDisplayableId());
                 }
-
                 result.accountName = name;
-                Logger.v(TAG, "Setting account. Account name: " + name + " package:"
-                        + mCallingPackage + " calling app UID:" + mAppCallingUID);
-                Account newaccount = accountList[0];
+                Logger.i(TAG, "Setting account. Account name: " + name + " package:"
+                        + mCallingPackage + " calling app UID:" + mAppCallingUID, "");
+               
 
                 // Cache logic will be changed based on latest logic
                 // This is currently keeping accesstoken and MRRT separate
@@ -875,10 +879,15 @@ public class AuthenticationActivity extends Activity {
                 // sqllite database. Only Authenticator and similar UID can
                 // access.
                 Gson gson = new Gson();
-                Logger.v(TAG, "app context:" + getApplicationContext().getPackageName()
+                Logger.i(TAG, "app context:" + getApplicationContext().getPackageName()
                         + " context:" + AuthenticationActivity.this.getPackageName()
-                        + " calling packagename:" + getCallingPackage());
+                        + " calling packagename:" + getCallingPackage(), "");
                 StorageHelper cryptoHelper = new StorageHelper(getApplicationContext());
+
+                if (AuthenticationSettings.INSTANCE.getSecretKeyData() == null) {
+                    Logger.i(TAG, "setAccount: user key is null", "");
+                }
+
                 TokenCacheItem item = new TokenCacheItem(mRequest, result.taskResult, false);
                 String json = gson.toJson(item);
                 String encrypted = cryptoHelper.encrypt(json);
@@ -903,7 +912,7 @@ public class AuthenticationActivity extends Activity {
                 // Record calling UID for this account so that app can get token
                 // in the background call without requiring server side
                 // validation
-                Logger.v(TAG, "Set calling uid:" + mAppCallingUID);
+                Logger.i(TAG, "Set calling uid:" + mAppCallingUID, "");
                 appendAppUIDToAccount(cryptoHelper, newaccount);
             } catch (NoSuchAlgorithmException e) {
                 Logger.e(TAG, "Algorithm does not exist in the device", "",
@@ -935,7 +944,7 @@ public class AuthenticationActivity extends Activity {
         }
 
         private void saveCacheKey(String key, Account cacheAccount, int callingUID) {
-            Logger.d(TAG, "Get CacheKeys for account");
+            Logger.v(TAG, "Get CacheKeys for account");
             // Store cachekeys for each UID
             // Activity has access to packagename and UID, but background call
             // in getAuthToken only knows about UID
@@ -960,29 +969,44 @@ public class AuthenticationActivity extends Activity {
             Logger.v(TAG, "Token task returns the result");
             displaySpinner(false);
             Intent intent = new Intent();
+
             if (result.taskResult != null) {
-                intent.putExtra(AuthenticationConstants.Browser.REQUEST_ID, mWaitingRequestId);
-                intent.putExtra(AuthenticationConstants.Broker.ACCOUNT_ACCESS_TOKEN,
-                        result.taskResult.getAccessToken());
-                intent.putExtra(AuthenticationConstants.Broker.ACCOUNT_NAME, result.accountName);
-                intent.putExtra(AuthenticationConstants.Broker.ACCOUNT_EXPIREDATE,
-                        result.taskResult.getExpiresOn().getTime());
-                if (result.taskResult.getUserInfo() != null) {
-                    intent.putExtra(AuthenticationConstants.Broker.ACCOUNT_USERINFO_USERID,
-                            result.taskResult.getUserInfo().getUserId());
-                    intent.putExtra(AuthenticationConstants.Broker.ACCOUNT_USERINFO_GIVEN_NAME,
-                            result.taskResult.getUserInfo().getGivenName());
-                    intent.putExtra(AuthenticationConstants.Broker.ACCOUNT_USERINFO_FAMILY_NAME,
-                            result.taskResult.getUserInfo().getFamilyName());
-                    intent.putExtra(
-                            AuthenticationConstants.Broker.ACCOUNT_USERINFO_IDENTITY_PROVIDER,
-                            result.taskResult.getUserInfo().getIdentityProvider());
-                    intent.putExtra(
-                            AuthenticationConstants.Broker.ACCOUNT_USERINFO_USERID_DISPLAYABLE,
-                            result.taskResult.getUserInfo().getDisplayableId());
+
+                if (result.taskResult.getStatus().equals(AuthenticationStatus.Succeeded)) {
+                    intent.putExtra(AuthenticationConstants.Browser.REQUEST_ID, mWaitingRequestId);
+                    intent.putExtra(AuthenticationConstants.Broker.ACCOUNT_ACCESS_TOKEN,
+                            result.taskResult.getAccessToken());
+                    intent.putExtra(AuthenticationConstants.Broker.ACCOUNT_NAME, result.accountName);
+
+                    if (result.taskResult.getExpiresOn() != null) {
+                        intent.putExtra(AuthenticationConstants.Broker.ACCOUNT_EXPIREDATE,
+                                result.taskResult.getExpiresOn().getTime());
+                    }
+
+                    UserInfo userinfo = result.taskResult.getUserInfo();
+                    if (userinfo != null) {
+                        intent.putExtra(AuthenticationConstants.Broker.ACCOUNT_USERINFO_USERID,
+                                userinfo.getUserId());
+                        intent.putExtra(AuthenticationConstants.Broker.ACCOUNT_USERINFO_GIVEN_NAME,
+                                userinfo.getGivenName());
+                        intent.putExtra(
+                                AuthenticationConstants.Broker.ACCOUNT_USERINFO_FAMILY_NAME,
+                                userinfo.getFamilyName());
+                        intent.putExtra(
+                                AuthenticationConstants.Broker.ACCOUNT_USERINFO_IDENTITY_PROVIDER,
+                                userinfo.getIdentityProvider());
+                        intent.putExtra(
+                                AuthenticationConstants.Broker.ACCOUNT_USERINFO_USERID_DISPLAYABLE,
+                                userinfo.getDisplayableId());
+                    }
+                    
+                    returnResult(AuthenticationConstants.UIResponse.TOKEN_BROKER_RESPONSE, intent);
+                } else {
+                    returnError(ADALError.AUTHORIZATION_CODE_NOT_EXCHANGED_FOR_TOKEN,
+                            result.taskResult.getErrorDescription());
                 }
-                returnResult(AuthenticationConstants.UIResponse.TOKEN_BROKER_RESPONSE, intent);
             } else {
+                Logger.v(TAG, "Token task has exception");
                 returnError(ADALError.AUTHORIZATION_CODE_NOT_EXCHANGED_FOR_TOKEN,
                         result.taskException.getMessage());
             }

@@ -78,7 +78,8 @@ public enum ADALError {
     /**
      * Activity is not resolved.
      */
-    DEVELOPER_ACTIVITY_IS_NOT_RESOLVED("Activity is not resolved"),
+    DEVELOPER_ACTIVITY_IS_NOT_RESOLVED(
+            "Activity is not resolved. Verify the activity name in your manifest file"),
 
     /**
      * android.permission.INTERNET is not added to AndroidManifest file.
@@ -98,6 +99,11 @@ public enum ADALError {
      */
     DEVELOPER_CALLING_ON_MAIN_THREAD("Calling from main thread for background operation"),
 
+    /**
+     * Layout file does not have correct elements such as different webview id
+     */
+    DEVELOPER_DIALOG_LAYOUT_INVALID("dialog_authentication.xml file has invalid elements"),
+    
     /**
      * Invalid request to server.
      */
@@ -244,6 +250,11 @@ public enum ADALError {
      * IdToken is normally returned from token endpoint.
      */
     IDTOKEN_PARSING_FAILURE("Cannot parse IdToken"),
+    
+    /**
+     * Dateformat is invalid.
+     */
+    DATE_PARSING_FAILURE("Cannot parse date"),
 
     /**
      * Authorization code not exchanged for token.
@@ -293,6 +304,11 @@ public enum ADALError {
      * Failed to use AndroidKeyStore.
      */
     ANDROIDKEYSTORE_FAILED("Failed to use AndroidKeyStore"),
+    
+    /**
+     * Failed to use AndroidKeyStore.
+     */
+    ANDROIDKEYSTORE_KEYPAIR_GENERATOR_FAILED("Failed to use KeyPairGeneratorSpec"),
 
     /**
      * Authority validation is not supported for ADFS authority. Authority
@@ -334,6 +350,11 @@ public enum ADALError {
      * Authenticator has IO Exception.
      */
     BROKER_AUTHENTICATOR_IO_EXCEPTION("Authenticator has IO Exception"),
+    
+    /**
+     * Authenticator returned exception.
+     */
+    BROKER_AUTHENTICATOR_EXCEPTION("Authenticator has an Exception"),
 
     /**
      * Signature could not be verified.

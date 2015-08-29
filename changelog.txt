@@ -1,0 +1,81 @@
+Version 1.1.8
+--------------
+hide keyboard at on pause at AuthenticationActivity.
+Update applicationreceiver to use only Azure Authenticator as broker.
+Check broker user for multi account usage.
+
+Version 1.1.7
+--------------
+Fix issue with acquireTokenSilent for new authenticator version.
+
+Version 1.1.6
+--------------
+Fix issue with failing wpj through Azure Authenticator
+
+Version 1.1.5
+--------------
+Send extra query parameter to Authenticator with Bundle options
+
+Version 1.1.4
+--------------
+ApplicationReceiver to resume after install of Azure Authenticator
+Gson datetime adapter to handle locale changes
+
+Version 1.1.3
+--------------
+Update maven plugin
+Load resource from context for authenticationDialog
+add tenantid to refresh token result if idtoken is missing in the result
+
+Version 1.1.2
+--------------
+Fix for token broker handling
+Update to pom file for build automation
+
+Version 1.1.1
+--------------
+Enroll button fix
+Updated webviewhelper class
+
+
+Version 1.1.0
+--------------
+HttpAuth dialog for ntlm challange
+getBrokerUsers support
+whitelisted login.microsoftonline.com
+
+Version 1.0.9
+--------------
+Bug fixes for Oauth2.java and loginhint usage
+
+Version 1.0.8
+--------------
+Adding client metrics information to be sent to AAD
+Detect webui cancel
+Update logger for correlationid
+Update PRNGfixes to allow different providers to be installed
+
+Version 1.0.7
+--------------
+Send PkeyAuth flag from embeded adal usage.
+Fix issue with promptBehavior param in broker usage.
+
+Version 1.0.6
+--------------
+Fragment and dialog support
+
+Version 1.0.5
+--------------
+Change broker redirectUri requirement to msauth://packagename/base64urlencodedSignature
+
+Version 1.0.4
+--------------
+Intune specific fix: Rollback logic for connecting to authenticator
+Add version to logs
+
+Version 1.0.3
+--------------
+Release Date: 10-3-2014
+* Dismiss spinner to resolve some UI issues
+* Use broker signature and authenticator type for checks. Get broker package from authenticator.
+

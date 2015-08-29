@@ -20,8 +20,6 @@ package com.microsoft.aad.adal.hello;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 
 import org.apache.http.HttpResponse;
 import org.apache.http.HttpStatus;
@@ -34,19 +32,17 @@ import org.apache.http.impl.client.DefaultHttpClient;
 import android.app.Activity;
 import android.app.ProgressDialog;
 import android.content.Intent;
-import android.content.pm.PackageInfo;
-import android.content.pm.PackageManager;
-import android.content.pm.PackageManager.NameNotFoundException;
-import android.content.pm.Signature;
 import android.os.AsyncTask;
+import android.os.Build;
 import android.os.Bundle;
-import android.util.Base64;
+import android.os.Handler;
 import android.util.Log;
 import android.view.Menu;
 import android.view.View;
 import android.view.Window;
 import android.webkit.CookieManager;
 import android.webkit.CookieSyncManager;
+import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -64,13 +60,22 @@ public class MainActivity extends Activity {
 
     final static String AUTHORIZATION_HEADER_BEARER = "Bearer ";
 
+    /**
+     * Extra query parameter nux=1 uses new login page at AAD. This is optional.
+     */
+    final static String EXTRA_QUERY_PARAM = "nux=1";
+
     private AuthenticationContext mAuthContext;
 
     private ProgressDialog mLoginProgressDialog;
 
     private AuthenticationResult mResult;
 
+    private Handler mHandler;
+
     TextView textView1;
+
+    EditText mEditText;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -83,13 +88,19 @@ public class MainActivity extends Activity {
         clearSessionCookie();
         try {
             // Provide key info for Encryption
-            Utils.setupKeyForSample();
+            if (Build.VERSION.SDK_INT < 18) {
+                Utils.setupKeyForSample();
+            }
+
             // init authentication Context
             mAuthContext = new AuthenticationContext(MainActivity.this, Constants.AUTHORITY_URL,
                     false);
         } catch (Exception e) {
             Toast.makeText(getApplicationContext(), "Encryption failed", Toast.LENGTH_SHORT).show();
         }
+
+        mEditText = (EditText)findViewById(R.id.editTextUsername);
+        mEditText.setText("");
 
         Toast.makeText(getApplicationContext(), TAG + "done", Toast.LENGTH_SHORT).show();
     }
@@ -112,6 +123,18 @@ public class MainActivity extends Activity {
             mLoginProgressDialog.dismiss();
             mLoginProgressDialog = null;
         }
+    }
+
+    public void onClickFragmentTest(View v) {
+        Intent intent = new Intent(getApplicationContext(), FragmentHolderActivity.class);
+        this.startActivity(intent);
+    }
+
+    public void onClickDialog(View v) {
+        Log.v(TAG, "dialog button is clicked");
+        mAuthContext.acquireToken(Constants.RESOURCE_ID, Constants.CLIENT_ID,
+                Constants.REDIRECT_URL, getUserLoginHint(), PromptBehavior.Auto, EXTRA_QUERY_PARAM,
+                getCallback());
     }
 
     public void onClickAcquireByRefreshToken(View v) {
@@ -186,6 +209,7 @@ public class MainActivity extends Activity {
                 if (mResult.getUserInfo() != null) {
                     Log.v(TAG, "User info userid:" + result.getUserInfo().getUserId()
                             + " displayableId:" + result.getUserInfo().getDisplayableId());
+                    mEditText.setText(result.getUserInfo().getDisplayableId());
                     Toast.makeText(getApplicationContext(),
                             "User:" + mResult.getUserInfo().getDisplayableId(), Toast.LENGTH_SHORT)
                             .show();
@@ -214,7 +238,7 @@ public class MainActivity extends Activity {
         Log.v(TAG, "token button is clicked");
         mLoginProgressDialog.show();
         mAuthContext.acquireToken(MainActivity.this, Constants.RESOURCE_ID, Constants.CLIENT_ID,
-                Constants.REDIRECT_URL, getUserLoginHint(), getCallback());
+                Constants.REDIRECT_URL, getUserLoginHint(), EXTRA_QUERY_PARAM, getCallback());
     }
 
     private void clearSessionCookie() {
@@ -286,12 +310,7 @@ public class MainActivity extends Activity {
     }
 
     private String getUserLoginHint() {
-        if (mResult != null && mResult.getUserInfo() != null
-                && mResult.getUserInfo().getDisplayableId() != null) {
-            return mResult.getUserInfo().getDisplayableId();
-        }
-
-        return null;
+        return mEditText.getText().toString();
     }
 
     /**

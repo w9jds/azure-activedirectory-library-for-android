@@ -94,6 +94,8 @@ public class AuthenticationConstants {
 
         public static final String ERROR_DESCRIPTION = "error_description";
 
+        public static final String ERROR_CODES = "error_codes";
+
         public static final String EXPIRES_IN = "expires_in";
 
         public static final String GRANT_TYPE = "grant_type";
@@ -150,6 +152,8 @@ public class AuthenticationConstants {
         public static final String REALM = "realm";
 
         public static final String LOGIN_HINT = "login_hint";
+        
+        public static final String WEB_UI_CANCEL = "access_denied";
 
         public static final String CORRELATION_ID = "correlation_id";
 
@@ -180,6 +184,8 @@ public class AuthenticationConstants {
 
         public static final String BROKER_REQUEST = "com.microsoft.aadbroker.adal.broker.request";
 
+        public static final String BROKER_REQUEST_RESUME = "com.microsoft.aadbroker.adal.broker.request.resume";
+        
         /**
          * Account type string.
          */
@@ -233,6 +239,8 @@ public class AuthenticationConstants {
         public static final String MULTI_RESOURCE_TOKEN = "account.multi.resource.token";
 
         public static final String ACCOUNT_NAME = "account.name";
+        
+        public static final String ACCOUNT_IDTOKEN = "account.idtoken";
 
         public static final String ACCOUNT_USERINFO_USERID = "account.userinfo.userid";
 
@@ -246,6 +254,8 @@ public class AuthenticationConstants {
 
         public static final String ACCOUNT_USERINFO_TENANTID = "account.userinfo.tenantid";
 
+        public static final String ADAL_VERSION_KEY = "adal.version.key";
+        
         public static final String ACCOUNT_UID_CACHES = "account.uid.caches";
 
         public static final String USERDATA_PREFIX = "userdata.prefix";
@@ -271,19 +281,27 @@ public class AuthenticationConstants {
         /**
          * Certificate authorities are passed with delimiter.
          */
-        public static final String CHALLANGE_REQUEST_CERT_AUTH_DELIMETER = ",";
+        public static final String CHALLANGE_REQUEST_CERT_AUTH_DELIMETER = ";";
 
         /**
          * Apk packagename that will install AD-Authenticator. It is used to
          * query if this app installed or not from package manager.
          */
-        public static final String PACKAGE_NAME = "com.microsoft.workaccount";
+        public static final String PACKAGE_NAME = "com.microsoft.windowsintune.companyportal";
 
         /**
-         * Signature info for AD-Authenticator installing app to verify broker
+         * Signature info for Intune Company portal app that installs authenticator
          * component.
          */
-        public static final String SIGNATURE = "HcArzSmaOsvXP3gYIEMHHVrmozI=\n";
+        public static final String SIGNATURE = "1L4Z9FJCgn5c0VLhyAxC5O9LdlE=";
+        
+        /**
+         * Signature info for Azure authenticator app that installs authenticator
+         * component.
+         */
+        public static final String AZURE_AUTHENTICATOR_APP_SIGNATURE = "ho040S3ffZkmxqtQrSwpTVOn9r0=";
+        
+        public static final String AZURE_AUTHENTICATOR_APP_PACKAGE_NAME = "com.azure.authenticator";
 
         public static final String CLIENT_TLS_REDIRECT = "urn:http-auth:PKeyAuth";
 
@@ -294,6 +312,12 @@ public class AuthenticationConstants {
         public static final String REDIRECT_PREFIX = "msauth";
 
         public static final Object REDIRECT_DELIMETER_ENCODED = "%2C";
+        
+        public static final String BROWSER_EXT_PREFIX = "browser://";
+        
+        public static final String BROWSER_EXT_INSTALL_PREFIX = "msauth://";
+
+        public static final String CALLER_INFO_PACKAGE = "caller.info.package";
     }
 
     public static final String ADAL_PACKAGE_NAME = "com.microsoft.aad.adal";

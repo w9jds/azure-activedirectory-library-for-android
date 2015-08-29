@@ -25,6 +25,9 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.math.BigInteger;
 import java.security.DigestException;
 import java.security.GeneralSecurityException;
@@ -40,8 +43,10 @@ import java.security.NoSuchProviderException;
 import java.security.SecureRandom;
 import java.security.UnrecoverableEntryException;
 import java.security.cert.CertificateException;
+import java.security.spec.AlgorithmParameterSpec;
 import java.security.spec.InvalidKeySpecException;
 import java.util.Calendar;
+import java.util.Date;
 
 import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
@@ -57,7 +62,6 @@ import javax.security.auth.x500.X500Principal;
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.os.Build;
-import android.security.KeyPairGeneratorSpec;
 import android.util.Base64;
 
 /**
@@ -244,32 +248,6 @@ public class StorageHelper {
     }
 
     /**
-     * load key pair from AndroidKeyStore. If not present, it will create one
-     * for this app.
-     * 
-     * @throws NoSuchAlgorithmException
-     * @throws NoSuchPaddingException
-     * @throws KeyStoreException
-     * @throws CertificateException
-     * @throws IOException
-     * @throws NoSuchProviderException
-     * @throws InvalidAlgorithmParameterException
-     * @throws UnrecoverableEntryException
-     */
-    private void loadKeyPair() throws NoSuchAlgorithmException, NoSuchPaddingException,
-            KeyStoreException, CertificateException, IOException, NoSuchProviderException,
-            InvalidAlgorithmParameterException, UnrecoverableEntryException {
-        // AndroidKeyStore is used for API >=18
-        if (Build.VERSION.SDK_INT >= 18) {
-            // Key pair only needed for API>=18
-
-            if (mKeyPair == null) {
-                mKeyPair = getKeyPairFromAndroidKeyStore();
-            }
-        }
-    }
-
-    /**
      * encrypt text with current key based on API level
      * 
      * @param clearText
@@ -287,7 +265,7 @@ public class StorageHelper {
             InvalidKeySpecException, InvalidKeyException, InvalidAlgorithmParameterException,
             IllegalBlockSizeException, BadPaddingException, IOException, NoSuchPaddingException {
 
-        Logger.d(TAG, "Starting encryption");
+        Logger.v(TAG, "Starting encryption");
 
         if (StringExtensions.IsNullOrBlank(clearText)) {
             throw new IllegalArgumentException("Input is empty or null");
@@ -333,7 +311,7 @@ public class StorageHelper {
 
         String encryptedText = new String(Base64.encode(blobVerAndEncryptedDataAndIVAndMacDigest,
                 Base64.NO_WRAP), AuthenticationConstants.ENCODING_UTF8);
-        Logger.d(TAG, "Finished encryption");
+        Logger.v(TAG, "Finished encryption");
 
         return getEncodeVersionLengthPrefix() + ENCODE_VERSION + encryptedText;
     }
@@ -344,7 +322,7 @@ public class StorageHelper {
             UnrecoverableEntryException, IOException, InvalidKeyException, DigestException,
             IllegalBlockSizeException, BadPaddingException {
 
-        Logger.d(TAG, "Starting decryption");
+        Logger.v(TAG, "Starting decryption");
 
         if (StringExtensions.IsNullOrBlank(value)) {
             throw new IllegalArgumentException("Input is empty or null");
@@ -404,7 +382,7 @@ public class StorageHelper {
         // Decrypt data bytes from 0 to ivindex
         String decrypted = new String(cipher.doFinal(bytes, KEY_VERSION_BLOB_LENGTH,
                 encryptedLength), AuthenticationConstants.ENCODING_UTF8);
-        Logger.d(TAG, "Finished decryption");
+        Logger.v(TAG, "Finished decryption");
         return decrypted;
     }
 
@@ -465,7 +443,11 @@ public class StorageHelper {
         File keyFile = new File(mContext.getDir(mContext.getPackageName(), Context.MODE_PRIVATE),
                 ADALKS);
 
-        loadKeyPair();
+        if (mKeyPair == null) {
+            mKeyPair = getKeyPairFromAndroidKeyStore();
+            Logger.v(TAG, "Retrived keypair from androidKeyStore");
+        }
+
         Cipher wrapCipher = Cipher.getInstance(WRAP_ALGORITHM);
         // If keyfile does not exist, it needs to generate one
         if (!keyFile.exists()) {
@@ -480,14 +462,35 @@ public class StorageHelper {
 
         // Read from file again
         Logger.v(TAG, "Reading SecretKey");
-        final byte[] encryptedKey = readKeyData(keyFile);
-        sSecretKeyFromAndroidKeyStore = unwrap(wrapCipher, encryptedKey);
-        Logger.v(TAG, "Finished reading SecretKey");
+        try {
+            final byte[] encryptedKey = readKeyData(keyFile);
+            sSecretKeyFromAndroidKeyStore = unwrap(wrapCipher, encryptedKey);
+            Logger.v(TAG, "Finished reading SecretKey");
+        } catch (Exception ex) {
+            // Reset KeyPair info so that new request will generate correct KeyPairs.
+            // All tokens with previous SecretKey are not possible to decrypt.
+            Logger.e(TAG, "Unwrap failed for AndroidKeyStore", "", ADALError.ANDROIDKEYSTORE_FAILED);
+            mKeyPair = null;
+            sSecretKeyFromAndroidKeyStore = null;
+            deleteKeyFile();
+            resetKeyPairFromAndroidKeyStore();
+            Logger.v(TAG, "Removed previous key pair info.");
+        }
         return sSecretKeyFromAndroidKeyStore;
     }
 
+    private void deleteKeyFile() {
+        // Store secret key in a file after wrapping
+        File keyFile = new File(mContext.getDir(mContext.getPackageName(), Context.MODE_PRIVATE),
+                ADALKS);
+        if (keyFile.exists()) {
+            Logger.v(TAG, "Delete KeyFile");
+            keyFile.delete();
+        }
+    }
+
     /**
-     * Get key pair
+     * Get key pair from AndroidKeyStore.
      * 
      * @return
      * @throws KeyStoreException
@@ -504,7 +507,6 @@ public class StorageHelper {
             InvalidAlgorithmParameterException, UnrecoverableEntryException {
         KeyStore keyStore = KeyStore.getInstance("AndroidKeyStore");
         keyStore.load(null);
-
         if (!keyStore.containsAlias(KEY_STORE_CERT_ALIAS)) {
             Logger.v(TAG, "Key entry is not available");
             Calendar start = Calendar.getInstance();
@@ -515,11 +517,8 @@ public class StorageHelper {
             // to a file
             String certInfo = String.format("CN=%s, OU=%s", KEY_STORE_CERT_ALIAS,
                     mContext.getPackageName());
-            final KeyPairGeneratorSpec spec = new KeyPairGeneratorSpec.Builder(mContext)
-                    .setAlias(KEY_STORE_CERT_ALIAS).setSubject(new X500Principal(certInfo))
-                    .setSerialNumber(BigInteger.ONE).setStartDate(start.getTime())
-                    .setEndDate(end.getTime()).build();
-
+            final AlgorithmParameterSpec spec = (AlgorithmParameterSpec)getKeyPairGeneratorSpec(
+                    new X500Principal(certInfo), start.getTime(), end.getTime());
             final KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA",
                     "AndroidKeyStore");
             generator.initialize(spec);
@@ -535,6 +534,58 @@ public class StorageHelper {
                 KEY_STORE_CERT_ALIAS, null);
         return new KeyPair(entry.getCertificate().getPublicKey(), entry.getPrivateKey());
     }
+    
+    @TargetApi(18)
+    private Object getKeyPairGeneratorSpec(X500Principal subj, Date start, Date end) {
+        Class<?> clazz;
+        try {
+            clazz = Class.forName("android.security.KeyPairGeneratorSpec$Builder");
+
+            Constructor<?> constructor = clazz.getDeclaredConstructor(Context.class);
+            constructor.setAccessible(true);
+            Object builder = constructor.newInstance(mContext);
+            Method setAlias = clazz.getDeclaredMethod("setAlias", String.class);
+            Method setSubject = clazz.getDeclaredMethod("setSubject", X500Principal.class);
+            Method setSerialNumber = clazz.getDeclaredMethod("setSerialNumber", BigInteger.class);
+            Method setStartDate = clazz.getDeclaredMethod("setStartDate", Date.class);
+            Method setEndDate = clazz.getDeclaredMethod("setEndDate", Date.class);
+            Method build = clazz.getDeclaredMethod("build");
+            builder = setAlias.invoke(builder, KEY_STORE_CERT_ALIAS);
+            builder = setSubject.invoke(builder, subj);
+            builder = setSerialNumber.invoke(builder, BigInteger.ONE);
+            builder = setStartDate.invoke(builder, start);
+            builder = setEndDate.invoke(builder, end);
+            return build.invoke(builder);
+        } catch (ClassNotFoundException e) {
+            Logger.e(TAG, "android.security.KeyPairGeneratorSpec.Builder is not found", "",
+                    ADALError.ANDROIDKEYSTORE_KEYPAIR_GENERATOR_FAILED, e);
+        } catch (IllegalArgumentException e) {
+            Logger.e(TAG, "android.security.KeyPairGeneratorSpec.Builder argument is not valid",
+                    "", ADALError.ANDROIDKEYSTORE_KEYPAIR_GENERATOR_FAILED, e);
+        } catch (InstantiationException e) {
+            Logger.e(TAG, "android.security.KeyPairGeneratorSpec.Builder is not instantiated", "",
+                    ADALError.ANDROIDKEYSTORE_KEYPAIR_GENERATOR_FAILED, e);
+        } catch (IllegalAccessException e) {
+            Logger.e(TAG, "android.security.KeyPairGeneratorSpec.Builder is not accessible", "",
+                    ADALError.ANDROIDKEYSTORE_KEYPAIR_GENERATOR_FAILED, e);
+        } catch (InvocationTargetException e) {
+            Logger.e(TAG, "android.security.KeyPairGeneratorSpec.Builder's method invoke failed",
+                    "", ADALError.ANDROIDKEYSTORE_KEYPAIR_GENERATOR_FAILED, e);
+        } catch (NoSuchMethodException e) {
+            Logger.e(TAG, "android.security.KeyPairGeneratorSpec.Builder is not found", "",
+                    ADALError.ANDROIDKEYSTORE_KEYPAIR_GENERATOR_FAILED, e);
+        }
+
+        return null;
+    }
+
+    @TargetApi(18)
+    private synchronized void resetKeyPairFromAndroidKeyStore() throws KeyStoreException,
+            NoSuchAlgorithmException, CertificateException, IOException {
+        KeyStore keyStore = KeyStore.getInstance("AndroidKeyStore");
+        keyStore.load(null);
+        keyStore.deleteEntry(KEY_STORE_CERT_ALIAS);
+    }
 
     @TargetApi(18)
     private byte[] wrap(Cipher wrapCipher, SecretKey key) throws GeneralSecurityException {
@@ -549,7 +600,7 @@ public class StorageHelper {
     }
 
     private static void writeKeyData(File file, byte[] data) throws IOException {
-        Logger.d(TAG, "Writing key data to a file");
+        Logger.v(TAG, "Writing key data to a file");
         final OutputStream out = new FileOutputStream(file);
         try {
             out.write(data);
@@ -559,7 +610,7 @@ public class StorageHelper {
     }
 
     private static byte[] readKeyData(File file) throws IOException {
-        Logger.d(TAG, "Reading key data from a file");
+        Logger.v(TAG, "Reading key data from a file");
         final InputStream in = new FileInputStream(file);
 
         try {

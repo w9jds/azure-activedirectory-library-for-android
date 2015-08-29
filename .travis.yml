@@ -2,7 +2,7 @@ language: android
 jdk: oraclejdk7
 android:
   components:
-    - build-tools-19.0.2
+    - build-tools-19.1.0
 env:
     matrix:
       - ANDROID_SDKS=android-18 ANDROID_TARGET=android-18
@@ -39,13 +39,3 @@ before_script:
 script: 
   - cd $PWD
   - mvn clean install
-  - cd $PWD/src
-  - ant clean debug
-  - cd -
-  - cd $PWD/tests/Functional
-  - chmod +x getLibs.sh
-  - bash getLibs.sh
-  # instrument classes with filter. coverage.em will be saved to bin/coverage.em
-  - ant clean -Demma.filter="-com.microsoft.aad.adal.testapp.*" emma instrument
-  # debug compile, install file, test all test cases
-  - ant -Demma.filter="-com.microsoft.aad.adal.testapp.*" emma debug install test

@@ -39,7 +39,21 @@ public enum AuthenticationSettings {
 
     private String mActivityPackageName;
 
+    /**
+     * SharedPreference package name to load this file from different context.
+     */
+    private String mSharedPrefPackageName;
+
     private boolean mSkipBroker = false;
+
+    /**
+     * Expiration buffer in seconds.
+     */
+    private int mExpirationBuffer = 300;
+
+    private int mConnectTimeOut = 30000;
+
+    private int mReadTimeOut = 30000;
 
     /**
      * Get bytes to derive secretKey to use in encrypt/decrypt.
@@ -137,7 +151,7 @@ public enum AuthenticationSettings {
     /**
      * set package name to setup intent for AuthenticationActivity.
      * 
-     * @param activityPackageName   activity to use from different package
+     * @param activityPackageName activity to use from different package
      */
     public void setActivityPackageName(String activityPackageName) {
         this.mActivityPackageName = activityPackageName;
@@ -159,5 +173,84 @@ public enum AuthenticationSettings {
      */
     public void setSkipBroker(boolean skip) {
         mSkipBroker = skip;
+    }
+
+    /**
+     * Sets package name to use {@link DefaultTokenCacheStore} with sharedUserId
+     * apps.
+     * 
+     * @param packageNameForSharedFile Package name of other app
+     */
+    public void setSharedPrefPackageName(String packageNameForSharedFile) {
+        this.mSharedPrefPackageName = packageNameForSharedFile;
+    }
+
+    /**
+     * Gets package name provided for shared preferences.
+     * 
+     * @return package name provided for shared preferences
+     */
+    public String getSharedPrefPackageName() {
+        return mSharedPrefPackageName;
+    }
+
+    /**
+     * Gets expiration buffer.
+     * 
+     * @return
+     */
+    public int getExpirationBuffer() {
+        return mExpirationBuffer;
+    }
+
+    /**
+     * When checking access token expiration, it will check if the time to
+     * expiration is less than this value(in seconds). Example: Set to 300 to
+     * give 5min buffer. Token with Expiry time of 12:04 will say expired when
+     * actual time is 12:00 with 5min buffer.
+     * 
+     * @param expirationBuffer
+     */
+    public void setExpirationBuffer(int expirationBuffer) {
+        this.mExpirationBuffer = expirationBuffer;
+    }
+
+    public int getConnectTimeOut() {
+        return mConnectTimeOut;
+    }
+
+    /**
+     * Sets the maximum time in milliseconds to wait while connecting.
+     * Connecting to a server will fail with a SocketTimeoutException if the
+     * timeout elapses before a connection is established. Default value is
+     * 30000 milliseconds.
+     * 
+     * @param timeOutMillis the connect timeout in milliseconds. Non-negative
+     * @throws IllegalArgumentException if timeoutMillis < 0.
+     */
+    public void setConnectTimeOut(int timeOutMillis) {
+        if (timeOutMillis < 0) {
+            throw new IllegalArgumentException("Invalid timeOutMillis");
+        }
+        this.mConnectTimeOut = timeOutMillis;
+    }
+
+    public int getReadTimeOut() {
+        return mReadTimeOut;
+    }
+
+    /**
+     * Sets the maximum time to wait for an input stream read to complete before
+     * giving up. Reading will fail with a SocketTimeoutException if the timeout
+     * elapses before data becomes available. The default value is 30000.
+     * 
+     * @param timeoutMillis the read timeout in milliseconds. Non-negative
+     */
+    public void setReadTimeOut(int timeOutMillis) {
+        if (timeOutMillis < 0) {
+            throw new IllegalArgumentException("Invalid timeOutMillis");
+        }
+
+        this.mReadTimeOut = timeOutMillis;
     }
 }

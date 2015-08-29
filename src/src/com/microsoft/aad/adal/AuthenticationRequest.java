@@ -52,8 +52,20 @@ class AuthenticationRequest implements Serializable {
 
     private boolean mSilent = false;
 
-    public AuthenticationRequest() {
+    private String mVersion = null;
 
+    private UserIdentifierType mIdentifierType;
+
+    /**
+     * Developer can use acquiretoken(with loginhint) or acquireTokenSilent(with
+     * userid), so this sets the type of the request.
+     */
+    enum UserIdentifierType {
+        UniqueId, LoginHint, NoUser
+    }
+
+    public AuthenticationRequest() {
+        mIdentifierType = UserIdentifierType.NoUser;
     }
 
     public AuthenticationRequest(String authority, String resource, String client, String redirect,
@@ -63,9 +75,11 @@ class AuthenticationRequest implements Serializable {
         mClientId = client;
         mRedirectUri = redirect;
         mLoginHint = loginhint;
+        mBrokerAccountName = mLoginHint;
         mPrompt = prompt;
         mExtraQueryParamsAuthentication = extraQueryParams;
         mCorrelationId = correlationId;
+        mIdentifierType = UserIdentifierType.NoUser;
     }
 
     public AuthenticationRequest(String authority, String resource, String client, String redirect,
@@ -75,6 +89,7 @@ class AuthenticationRequest implements Serializable {
         mClientId = client;
         mRedirectUri = redirect;
         mLoginHint = loginhint;
+        mBrokerAccountName = mLoginHint;
         mCorrelationId = requestCorrelationId;
     }
 
@@ -85,6 +100,7 @@ class AuthenticationRequest implements Serializable {
         mClientId = client;
         mRedirectUri = redirect;
         mLoginHint = loginhint;
+        mBrokerAccountName = mLoginHint;
     }
 
     public AuthenticationRequest(String authority, String resource, String clientid) {
@@ -100,7 +116,7 @@ class AuthenticationRequest implements Serializable {
      * @param resource
      * @param clientid
      * @param userid
-     * @param correlationId 
+     * @param correlationId
      */
     public AuthenticationRequest(String authority, String resource, String clientid, String userid,
             UUID correlationId) {
@@ -121,6 +137,10 @@ class AuthenticationRequest implements Serializable {
 
     public String getAuthority() {
         return mAuthority;
+    }
+
+    public void setAuthority(String authority) {
+        mAuthority = authority;
     }
 
     public String getRedirectUri() {
@@ -148,14 +168,8 @@ class AuthenticationRequest implements Serializable {
     }
 
     public String getLogInfo() {
-        // directly access values without getter to make it fast
-        String correlation = "";
-        if (mCorrelationId != null) {
-            correlation = mCorrelationId.toString();
-        }
-
-        return String.format("Request authority:%s resource:%s clientid:%s correlationId:%s",
-                mAuthority, mResource, mClientId, correlation);
+        return String.format("Request authority:%s resource:%s clientid:%s", mAuthority, mResource,
+                mClientId);
     }
 
     public PromptBehavior getPrompt() {
@@ -206,5 +220,21 @@ class AuthenticationRequest implements Serializable {
 
     public void setSilent(boolean silent) {
         this.mSilent = silent;
+    }
+
+    public String getVersion() {
+        return mVersion;
+    }
+
+    public void setVersion(String version) {
+        this.mVersion = version;
+    }
+
+    public UserIdentifierType getUserIdentifierType() {
+        return mIdentifierType;
+    }
+
+    public void setUserIdentifierType(UserIdentifierType user) {
+        mIdentifierType = user;
     }
 }
